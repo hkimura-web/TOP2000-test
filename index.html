@@ -751,11 +751,12 @@ async function buildXLSX(title, wSel, rSel, includeAns) {
   // wrapText化 (s=18→s=17)
   sheet = sheet.replace(/ s="18"\//g, ' s="17"/');
 
-  // 設問2の文言を差し替え（L1セル）。2行に分けて表示するため改行(&#10;)を入れ、折り返しONのスタイルにする
+  // 設問2の文言を差し替え（L1セル）。L列全体(L1:L32)を結合して縦1行で表示する
   var q2Idx = strings.indexOf('２　次の漢字のよみをひらがなで答えよ。');
   if (q2Idx >= 0) {
-    strings[q2Idx] = '\x00TITLE_XML\x00<si><t xml:space="preserve">２　次の漢字のよみをひらがなで答えよ。&#10;送り仮名のある漢字は傍線部のみ書くこと。</t></si>';
+    strings[q2Idx] = '２　次の漢字のよみをひらがなで答えよ。送り仮名のある漢字は傍線部のみ書くこと。';
     sheet = sheet.replace('<c r="L1" s="18" t="s">', '<c r="L1" s="17" t="s">');
+    sheet = sheet.replace('<mergeCell ref="L1:L14"/>', '<mergeCell ref="L1:L32"/>');
   }
 
   // 読み問題：送り仮名（かな）を含む語は、漢字部分だけに下線（傍線）を付ける
