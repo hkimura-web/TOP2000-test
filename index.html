@@ -751,6 +751,32 @@ async function buildXLSX(title, wSel, rSel, includeAns) {
   // wrapText化 (s=18→s=17)
   sheet = sheet.replace(/ s="18"\//g, ' s="17"/');
 
+  // 設問2の文言を差し替え（L1セル）。2行に分けて表示するため改行(&#10;)を入れ、折り返しONのスタイルにする
+  var q2Idx = strings.indexOf('２　次の漢字のよみをひらがなで答えよ。');
+  if (q2Idx >= 0) {
+    strings[q2Idx] = '\x00TITLE_XML\x00<si><t xml:space="preserve">２　次の漢字のよみをひらがなで答えよ。&#10;送り仮名のある漢字は傍線部のみ書くこと。</t></si>';
+    sheet = sheet.replace('<c r="L1" s="18" t="s">', '<c r="L1" s="17" t="s">');
+  }
+
+  // 読み問題：送り仮名（かな）を含む語は、漢字部分だけに下線（傍線）を付ける
+  function isKanjiChar(c) { return /[\u4E00-\u9FFF\u3400-\u4DBF\u3005]/.test(c); }
+  function readingQIdx(k) {
+    var chars = Array.from(k);
+    if (chars.every(isKanjiChar)) return getOrAdd(k);   // 全部漢字（音読みなど）は傍線なし
+    var runs = [];
+    chars.forEach(function(c) {
+      var kj = isKanjiChar(c);
+      if (runs.length && runs[runs.length - 1].kj === kj) runs[runs.length - 1].t += c;
+      else runs.push({ kj: kj, t: c });
+    });
+    var font = '<sz val="10"/><rFont val="ＭＳ 明朝"/><family val="1"/><charset val="128"/>';
+    var xml = '<si>' + runs.map(function(r) {
+      return '<r><rPr>' + (r.kj ? '<u/>' : '') + font + '</rPr><t>' + xmlEsc(r.t) + '</t></r>';
+    }).join('') + '</si>';
+    strings.push('\x00TITLE_XML\x00' + xml);
+    return strings.length - 1;
+  }
+
   // タイトル (X2)：タイトル＋日付を共有文字列として書き込む
   // 改行は&#10;エンティティで表現（wrapText=trueのセルで改行表示される）
   // strings配列に直接追加してxmlEscを通さない形で管理
@@ -783,7 +809,7 @@ async function buildXLSX(title, wSel, rSel, includeAns) {
   });
   rSel.forEach(function(p, i) {
     var coord = RC[i+21];
-    var idx = getOrAdd(p.k);
+    var idx = readingQIdx(p.k);
     sheet = sheet.replace(new RegExp('<c r="' + coord + '" s="17"/>'),
       '<c r="' + coord + '" s="17" t="s"><v>' + idx + '</v></c>');
   });
