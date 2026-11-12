@@ -720,6 +720,70 @@ function pickBalanced(bySec, n) {
   return selected;
 }
 
+// ===== 漢字の重複を避ける出題 =====
+// ルール：1回のテスト（書き取り20問＋読み10問）の中で、答えになる漢字を同じ字で重ねない
+//   書き取り＝解答の漢字、読み＝問題の漢字。書き取りと読みの間も含めて重複を避ける
+function _isKanjiCh(c) { return /[\u4E00-\u9FFF\u3400-\u4DBF\u3005]/.test(c); }
+function kanjiOfItem(item) {
+  var s = (item.k !== undefined) ? item.k : item.a;
+  var seen = {}, out = [];
+  Array.from(s).forEach(function(c) {
+    // 「々」は繰り返し記号なので対象外。1つの語の中で同じ字が繰り返されても1回と数える
+    if (/[\u4E00-\u9FFF\u3400-\u4DBF]/.test(c) && !seen[c]) { seen[c] = true; out.push(c); }
+  });
+  return out;
+}
+function _tryTake(item, used) {
+  var ks = kanjiOfItem(item);
+  for (var i = 0; i < ks.length; i++) { if (used[ks[i]]) return false; }
+  ks.forEach(function(c) { used[c] = true; });
+  return true;
+}
+// 章（セクション）ごとに均等に取りつつ、使用済みの漢字を含む問題は選ばない
+function pickBalancedUnique(bySec, n, used) {
+  if (!bySec.length) return [];
+  bySec = shuffle(bySec);   // 余りの枠がいつも先頭のセクションに偏らないよう、順番をランダムにする
+  var base = Math.floor(n / bySec.length), extra = n % bySec.length;
+  var selected = [], leftovers = [], shortfall = 0;
+  for (var i = 0; i < bySec.length; i++) {
+    var need = base + (i < extra ? 1 : 0) + shortfall, got = 0;
+    shuffle(bySec[i]).forEach(function(item) {
+      if (got < need && _tryTake(item, used)) { selected.push(item); got++; }
+      else leftovers.push(item);
+    });
+    shortfall = need - got;
+  }
+  if (selected.length < n) {
+    shuffle(leftovers).forEach(function(item) {
+      if (selected.length < n && _tryTake(item, used)) selected.push(item);
+    });
+  }
+  return selected;
+}
+// 書き取り・読みをまとめて選ぶ。重複なしで取れるまで何度かやり直す
+function pickTest(wBySec, rBySec) {
+  var best = null;
+  for (var t = 0; t < 400; t++) {
+    var used = {};
+    var w = pickBalancedUnique(wBySec, 20, used);
+    var r = pickBalancedUnique(rBySec, 10, used);
+    var score = w.length + r.length;
+    if (!best || score > best.score) best = { w: w, r: r, score: score };
+    if (score === 30) break;
+  }
+  var relaxed = false;
+  // 範囲が狭くて重複なしでは足りない場合だけ、足りない分を重複ありで補う
+  function fill(sel, bySec, n) {
+    if (sel.length >= n) return;
+    var rest = [];
+    bySec.forEach(function(s) { s.forEach(function(x) { if (sel.indexOf(x) < 0) rest.push(x); }); });
+    shuffle(rest).slice(0, n - sel.length).forEach(function(x) { sel.push(x); relaxed = true; });
+  }
+  fill(best.w, wBySec, 20);
+  fill(best.r, rBySec, 10);
+  return { w: best.w, r: best.r, relaxed: relaxed };
+}
+
 // ===== XLSX生成（前回と同じロジック）=====
 async function buildXLSX(title, wSel, rSel, includeAns) {
   var bin = atob(TMPL);
@@ -892,8 +956,9 @@ async function generate() {
     var title        = baseTitle;
     var xlsxTitle    = baseTitle + '\n' + testDate;
     var xlsxTitleKai = baseTitle + '【解答】\n' + testDate;
-    var wSel  = pickBalanced(wBySec, 20);
-    var rSel  = pickBalanced(rBySec, 10);
+    var picked = pickTest(wBySec, rBySec);
+    var wSel  = picked.w;
+    var rSel  = picked.r;
     var safe  = title.replace(/[\/\\:*?"<>|]/g, '_');
 
     var mondai = await buildXLSX(xlsxTitle, wSel, rSel, false);
@@ -904,7 +969,8 @@ async function generate() {
 
     alertBox.className = 'alert alert-ok';
     alertBox.innerHTML = '✅ <strong>' + safe + '_問題.xlsx</strong> と <strong>' + safe + '_解答.xlsx</strong> をダウンロードしました！<br>'
-      + '<span style="font-size:.8rem;opacity:.8">再度押すと別のランダム問題が生成されます。</span>';
+      + '<span style="font-size:.8rem;opacity:.8">再度押すと別のランダム問題が生成されます。</span>'
+      + (picked.relaxed ? '<br><span style="font-size:.8rem;color:#c0392b">⚠ 選んだ範囲が狭いため、同じ漢字の重複を完全には避けられませんでした。範囲を広げると解消します。</span>' : '');
     alertBox.style.display = 'block';
     showPreview(wSel, rSel);
   } catch(e) {
